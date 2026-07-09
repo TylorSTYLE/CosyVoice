@@ -35,7 +35,6 @@ torchaudio.load = _sf_load
 torchaudio.save = _sf_save
 
 from cosyvoice.cli.cosyvoice import AutoModel
-from cosyvoice.utils.file_utils import load_wav
 from cosyvoice.utils.common import set_all_random_seed
 
 
@@ -62,14 +61,15 @@ def main() -> None:
     print(f'[load] {time.time() - t0:.1f}s')
 
     sr = model.sample_rate
-    prompt = load_wav(args.prompt_wav, 16000)
+    # This fork's inference_* take the prompt as a FILE PATH (see vllm_example.py);
+    # the frontend loads it internally at 16k/24k. Do NOT pre-load to a tensor.
     print(f'sample_rate={sr}  mode={args.mode}  text="{args.text}"')
 
     def synth():
         if args.mode == 'cross_lingual':
-            gen = model.inference_cross_lingual(args.text, prompt, stream=False)
+            gen = model.inference_cross_lingual(args.text, args.prompt_wav, stream=False)
         else:
-            gen = model.inference_zero_shot(args.text, args.prompt_text, prompt, stream=False)
+            gen = model.inference_zero_shot(args.text, args.prompt_text, args.prompt_wav, stream=False)
         chunks = [o['tts_speech'] for o in gen]
         return torch.cat(chunks, dim=1)
 

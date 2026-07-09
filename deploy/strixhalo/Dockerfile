@@ -99,6 +99,7 @@ COPY third_party /opt/CosyVoice/third_party
 COPY asset /opt/CosyVoice/asset
 COPY deploy/strixhalo/bench_cosyvoice.py /opt/CosyVoice/bench_cosyvoice.py
 ENV PYTHONPATH=/opt/CosyVoice:/opt/CosyVoice/third_party/Matcha-TTS \
-    HF_HOME=/cache/hf
+    HF_HOME=/cache/hf \
+    MODELSCOPE_CACHE=/cache/modelscope
 
 CMD ["python", "bench_cosyvoice.py"]
