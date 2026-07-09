@@ -1,0 +1,110 @@
+# NOTES — CosyVoice on Strix Halo (gfx1151) : findings·결정·벤치 로그
+
+> 실행 모델: DEV=Apple Silicon M2(코드/문법/mock 테스트만). TARGET=Strix Halo 서버(사용자가
+> 서버에서 직접 실행, SSH 불가). 서버 출력을 붙여받아 여기 기록한다. 수치엔 출처를 남긴다.
+
+---
+
+## Phase 0 — 정찰 / 토폴로지 확정
+
+### 로컬(Mac) 정찰 결과 (2026-07-09, 이 세션)
+- 레포에 `deploy/` 없음 → `deploy/strixhalo/` 신규. fork=`TylorSTYLE/CosyVoice`(HTTPS).
+  서브모듈 `third_party/Matcha-TTS`.
+- vLLM 연동: `AutoModel(load_vllm=True)` → `cosyvoice/cli/model.py:281 load_vllm()` →
+  `export_cosyvoice2_vllm()` 후 `LLMEngine.from_engine_args(EngineArgs(model=dir,
+  skip_tokenizer_init=True, enable_prompt_embeds=True, gpu_memory_utilization=0.2))`.
+  → **`enable_prompt_embeds=True` 가 CosyVoice 고유 요구** (Phase 2 vLLM 빌드 검증 포인트).
+  vLLM 모델 클래스 `cosyvoice/vllm/cosyvoice2.py:CosyVoice2ForCausalLM`(Qwen2), V1/legacy 분기 존재.
+- 버전(README `#### vLLM Usage`): vLLM `0.9.0`(legacy, transformers==4.51.3) 또는 `0.11.0`
+  (V1, transformers==4.57.1), numpy==1.26.4. 0.10.x 미검증. base torch==2.3.1+CUDA(→ROCm 교체), py3.10.
+- 파이프라인: LLM(vLLM) → flow(DiT, torch) → hift(HiFi-GAN, torch).
+- 기존 서빙 `runtime/python/fastapi/server.py` = Form 기반 비-OpenAI → 신규 OpenAI `server.py` 필요.
+- 모델 = **Fun-CosyVoice3-0.5B-2512**(우선), `vllm_example.py:22` 기준 load_vllm=True, fp16=False.
+- asset/ 에 KR 클립 없음 → **우선 기존 프롬프트 클립으로 한국어 텍스트 검증**.
+- 결정: 코드동기화=git, 서버접속=사용자 직접 실행(SSH 불가).
+
+### 서버 정찰 결과 (2026-07-09, 서버 로컬 실행 — SSH 불가)
+- **ARCH/OS/커널**: x86_64 · Ubuntu **26.04 LTS (Resolute Raccoon)** · 커널 **7.0.0-22-generic**
+  → 최신 KFD ABI, gfx1151 지원 유리.
+- **GPU**: AMD RYZEN AI Max+ 395 w/ Radeon 8060S, **gfx1151**(40 CU) 확정. rocm-smi GFX Version=gfx1151.
+  (rocminfo에 `gfx11-generic` 타깃도 노출 — 폴백 아키텍처.)
+- **디바이스**: `/dev/kfd`(root:**render** 235,0), `/dev/dri/renderD128`(root:**render** 226,128),
+  `/dev/dri/card1`(root:**video** 226,1). 전부 `crw-rw----`.
+- **그룹 GID**: **render=993(비표준!)**, **video=44**. user `tylorstyle`은 양쪽 다 소속.
+  → **결정**: 컨테이너 root 실행이면 device-only로 충분. 비-root거나 rw 실패 시
+  `group_add: ["993","44"]`(render, video) 추가. compose에 device-only로 시작 후 실측.
+- **호스트 ROCm**: `/opt/rocm` **없음**. 그러나 rocminfo/rocm-smi 동작 → 호스트는 **KFD 커널
+  드라이버만** 제공. 컨테이너가 TheRock ROCm 7.x userspace 전부 반입 = **의도한 아키텍처와 일치**.
+  (호스트-컨테이너 ROCm 버전 독립. 필요한 건 호스트 KFD가 gfx1151 enumerate 가능 → 확인됨.)
+- **Docker**: 29.4.1. `docker info` 권한 실패 → ⚠️ 빌드 전 docker 그룹/sudo 권한 확인 필요(블로커 아님).
+- **git/net/disk**: git 2.53.0, `/` 1.9T 중 **1.1T 여유(44% 사용)**, HF `HTTP/2 200`(접근 가능).
+
+**Phase 0 게이트 판정: PASS.** 타깃 HW/드라이버/네트워크/디스크 모두 진행 가능. Ollama 컨테이너는
+현재 미기동이라 device 설정 카피 불가 → device-only 시작 후 group_add 폴백 전략 채택.
+다음: 정확한 ROCm/torch/vLLM 버전·URL 실조회 → Phase 1 Dockerfile.
+
+---
+
+## Phase 1 — gfx1151 torch (서버)
+
+### 확정 스택 (버전·URL 실조회, 2026-07-09 — 출처 하단)
+- **Base**: `ubuntu:26.04`.
+- **ROCm userspace**: TheRock **나이틀리 gfx1151 타르볼**(S3, `therock-dist-linux-gfx1151-7.*`)를
+  `/opt/rocm` 로 풀기. 호스트 `/opt/rocm` 불필요(컨테이너가 전부 반입). 스크립트가 최신 tarball 자동 해석.
+- **PyTorch**: AMD **prerelease 인덱스** `https://rocm.prereleases.amd.com/whl/gfx1151/` 의
+  네이티브 휠(`--pre torch torchaudio`, 현재 해석값 `torch 2.9.1+rocm7.13.0rc2`). **stock pytorch.org
+  ROCm 휠 금지**(gfx1151 SIGSEGV). repo.radeon.com 은 gfx1151 미제공(gfx1100 전용) → 사용 금지.
+- **Python**: **3.10**(uv 로 standalone CPython 프로비저닝). 인덱스에 cp310 휠 존재 확인. CosyVoice
+  생태계(ttsfrd/deepspeed/requirements)가 3.10 기준이라 채택(hec-ovi 의 3.12 대신 의도적 선택).
+- **numpy**: 1.26.4 (torch 뒤에 PyPI 에서 설치, 인덱스는 first-index 전략으로 torch 만 rocm 인덱스).
+- **핵심 gfx1151 env**: `PYTORCH_ROCM_ARCH=gfx1151`, `HSA_OVERRIDE_GFX_VERSION=11.5.1`(하이브리드
+  안전값, 네이티브면 무해), `VLLM_ROCM_USE_AITER=0`(CDNA 전용 커널 → gfx1151 프리즈 회피),
+  `ROCBLAS_USE_HIPBLASLT=1`, `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`, `HIP_FORCE_DEV_KERNARG=1`.
+
+### 만든 파일 (로컬)
+- `Dockerfile`(멀티스테이지, 현재 `rocm-torch` 스테이지만) · `scripts/install_rocm_sdk.sh`(S3 최신
+  tarball 해석·설치) · `smoke_gpu.py`(matmul 정합성 + AR 디코드 프록시 마이크로벤치) · 루트 `.dockerignore`.
+
+### 서버 실행 결과 (붙여넣기 대기)
+```
+# docker build --target rocm-torch  +  docker run smoke_gpu.py 출력
+```
+게이트: 세그폴트(exit 139) 없이 torch.cuda True + matmul OK. AR 프록시의 "sync overhead x" 값이
+gfx1151 hipMemcpyWithStream 병목 베이스라인 → Phase 2 vLLM 이 이걸 이겨야 함.
+
+## Phase 2 — vLLM 소스빌드 (서버, GO/NO-GO)
+(대기)
+
+## Phase 3 — CosyVoice 연동 (서버)
+(대기)
+
+## Phase 4 — 서빙 + 벤치 (서버/로컬)
+(대기)
+
+## Phase 5 — 마감
+(대기)
+
+---
+
+## 출처 (URL·버전, 실조회 2026-07-09)
+- hec-ovi/vllm-qwen (빌드 레퍼런스): https://github.com/hec-ovi/vllm-qwen
+  - Dockerfile: https://raw.githubusercontent.com/hec-ovi/vllm-qwen/main/Dockerfile
+  - install_rocm_sdk.sh: https://raw.githubusercontent.com/hec-ovi/vllm-qwen/main/scripts/install_rocm_sdk.sh
+  - patch_strix.py: https://raw.githubusercontent.com/hec-ovi/vllm-qwen/main/scripts/patch_strix.py
+- TheRock gfx1151 나이틀리 tarball(S3 리스팅):
+  https://therock-nightly-tarball.s3.amazonaws.com?list-type=2&prefix=therock-dist-linux-gfx1151-7
+- AMD gfx1151 prerelease torch 인덱스: https://rocm.prereleases.amd.com/whl/gfx1151/ (및 `/torch/`)
+- TheRock: https://github.com/ROCm/TheRock (Discussion #655: https://github.com/ROCm/TheRock/discussions/655)
+- repo.radeon.com gfx1151 torch: **미제공**(gfx1100/1101 전용). 근거 https://github.com/ROCm/ROCm/issues/5339
+- vLLM V1 prompt-embeds(0.11.0 지원 근거): https://github.com/vllm-project/vllm/issues/22124 (PR #24278)
+- Fun-CosyVoice3-0.5B-2512: HF https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B-2512 ·
+  Modelscope https://www.modelscope.cn/models/FunAudioLLM/Fun-CosyVoice3-0.5B-2512
+
+## Phase 2 결정 대기 (go/no-go 이전)
+- vLLM 버전: **0.11.0(V1) 우선**, 단 0.11.0 `requirements/rocm.txt` 가 torch==2.8.0 핀 → TheRock
+  torch 2.9.1 과 충돌 가능. 실패 시 **HEAD(0.19.2rc1)** 로 폴백(gfx1151 실증된 유일 조합). 서버에서
+  `git checkout v0.11.0` + `patch_strix.py` + `--constraint`(torch 2.9.1 핀) `--no-deps` 빌드로 먼저 시도.
+- vLLM 빌드 env: `VLLM_TARGET_DEVICE=rocm`, `PYTORCH_ROCM_ARCH=gfx1151`, `HIP_ARCHITECTURES=gfx1151`,
+  `GPU_TARGETS=gfx1151`, `CC/CXX=/opt/rocm/llvm/bin/clang(++)`, `CMAKE_ARGS=-DGPU_TARGETS=gfx1151 ...`.
+- 런타임: `--enforce-eager`(HIP graph 프리즈 회피), `--enable-prompt-embeds --skip-tokenizer-init`.
+- 미검증 리스크: 0.11.0 vs torch 2.9.1 ABI, numpy 1.26.4 vs 최신 deps 충돌 → 서버에서 실측.

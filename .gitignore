@@ -41,6 +41,11 @@ tensorboard
 .cache
 compile_commands.json
 
+# secrets / local env (deploy)
+.env
+**/.env
+!**/.env.example
+
 # train/inference files
 *.wav
 *.m4a

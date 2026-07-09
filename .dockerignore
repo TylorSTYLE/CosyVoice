@@ -1,0 +1,14 @@
+# Keep the Docker build context small. The strixhalo image COPYs only a few
+# files from deploy/strixhalo/; models/data are mounted at runtime, not baked in.
+.git
+.github
+**/__pycache__/
+*.pyc
+pretrained_models/
+exp/
+data/
+raw_wav/
+tensorboard/
+*.tar
+*.pt
+runtime/triton_trtllm/
