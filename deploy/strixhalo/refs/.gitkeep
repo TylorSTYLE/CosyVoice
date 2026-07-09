@@ -1,0 +1,3 @@
+# Drop reference voice clips (*.wav) here on the server. This dir is bind-mounted
+# read-only into the container at /refs. Point COSYVOICE_PROMPT_WAV=/refs/<file>.wav
+# and set COSYVOICE_PROMPT_TEXT to that clip's transcript. *.wav is gitignored.

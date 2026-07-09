@@ -32,6 +32,7 @@ services:
       - cosy_hf:/cache/hf            # HF cache
       - cosy_ms:/cache/modelscope    # wetext / modelscope cache
       - cosy_miopen:/cache/miopen    # MIOpen kernel cache (persist across restarts)
+      - ./refs:/refs:ro              # drop reference voice clips here; point COSYVOICE_PROMPT_WAV at /refs/<file>
     restart: unless-stopped
 
 volumes:

@@ -74,6 +74,20 @@ pre-converts digits to **sino-Korean** ("이천이십사"); toggle with `COSYVOI
 Limitation: sino-only — native numerals for hours/counters (3시 → ideally "세 시") and per-digit
 phone/ID reading are not handled.
 
+## Replace the reference voice (e.g. a Korean announcer)
+The output timbre/prosody clones the reference clip. To swap it (no rebuild):
+1. Put a clip on the server in `deploy/strixhalo/refs/` (bind-mounted read-only at `/refs`).
+   Requirements: **≤30s (3–10s ideal), ≥16 kHz, mono, clean single-speaker speech.**
+2. In `deploy/strixhalo/.env`, point the two vars at it — `PROMPT_TEXT` must be the
+   clip's **actual transcript**, in the CosyVoice3 form `<instruct><|endofprompt|><transcript>`:
+   ```
+   COSYVOICE_PROMPT_WAV=/refs/announcer.wav
+   COSYVOICE_PROMPT_TEXT=차분하고 또렷한 뉴스 아나운서입니다.<|endofprompt|>오늘의 주요 뉴스를 전해드립니다.
+   ```
+   (The text before `<|endofprompt|>` is the style instruct; the text after is what the clip says.)
+3. `docker compose up -d --force-recreate`. ⚠️ Never leave a var blank in `.env` (it overrides
+   the image ENV — see the HSA_OVERRIDE note above).
+
 ## Benchmark (RTF)
 ```bash
 docker compose run --rm cosyvoice-tts python bench_cosyvoice.py --fp16
