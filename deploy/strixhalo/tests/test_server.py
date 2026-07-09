@@ -37,6 +37,13 @@ def test_health(client):
     assert r.status_code == 200 and r.json() == {'status': 'ok'}
 
 
+def test_demo_page(client):
+    r = client.get('/')
+    assert r.status_code == 200
+    assert 'text/html' in r.headers['content-type']
+    assert '/v1/audio/speech' in r.text  # the page calls the API
+
+
 def test_models(client):
     r = client.get('/v1/models')
     body = r.json()

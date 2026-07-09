@@ -51,6 +51,9 @@ snapshot_download('FunAudioLLM/Fun-CosyVoice3-0.5B-2512', local_dir='/models/Fun
 ```
 
 ## Use
+A minimal **demo web page** is served at `http://<server>:8880/` — type Korean text, pick
+mp3/wav, hit 합성, and it plays the audio with the measured synth time / RTF.
+
 ```bash
 curl -s http://localhost:8880/health
 curl -s http://localhost:8880/v1/models

@@ -20,7 +20,7 @@ from typing import Optional
 
 import numpy as np
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 # --- torchaudio 2.9 -> soundfile shim (no TorchCodec on gfx1151); see bench_cosyvoice.py ---
@@ -152,6 +152,54 @@ class SpeechRequest(BaseModel):
 
 
 app = FastAPI(title='CosyVoice3 OpenAI-compatible TTS (Strix Halo gfx1151)')
+
+DEMO_HTML = """<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CosyVoice3 · gfx1151 데모</title>
+<style>
+ :root{color-scheme:light dark}
+ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem}
+ h1{font-size:1.25rem} textarea{width:100%;min-height:6rem;font-size:1rem;padding:.6rem;box-sizing:border-box}
+ .row{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;margin:.75rem 0}
+ button{font-size:1rem;padding:.5rem 1.1rem;cursor:pointer}
+ button:disabled{opacity:.5;cursor:progress}
+ audio{width:100%;margin-top:.75rem} #status{color:#888;font-size:.9rem;min-height:1.2em}
+ label{font-size:.9rem} select,input[type=number]{font-size:1rem;padding:.3rem}
+</style></head><body>
+<h1>🗣️ CosyVoice3 한국어 TTS <small>(Strix Halo gfx1151)</small></h1>
+<textarea id="t">안녕하세요. 오늘 날씨가 정말 좋네요. 우리 함께 산책하러 갈까요?</textarea>
+<div class="row">
+ <label>형식 <select id="fmt"><option value="mp3">mp3</option><option value="wav">wav</option></select></label>
+ <label>속도 <input id="spd" type="number" value="1.0" step="0.1" min="0.5" max="2" style="width:4.5rem"></label>
+ <button id="go">합성</button>
+ <span id="status"></span>
+</div>
+<audio id="a" controls></audio>
+<p style="color:#888;font-size:.8rem">첫 문장(새 길이)은 GPU 커널 컴파일로 느릴 수 있고, 같은 문장 재요청은 캐시로 빨라집니다.</p>
+<script>
+const $=s=>document.querySelector(s);
+$('#go').onclick=async()=>{
+  const input=$('#t').value.trim(); if(!input){$('#status').textContent='텍스트를 입력하세요';return;}
+  const b=$('#go'); b.disabled=true; $('#status').textContent='합성 중…';
+  const t0=performance.now();
+  try{
+    const r=await fetch('/v1/audio/speech',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({input,response_format:$('#fmt').value,speed:parseFloat($('#spd').value)||1})});
+    if(!r.ok){$('#status').textContent='오류: '+r.status+' '+await r.text();return;}
+    const blob=await r.blob(); const secs=((performance.now()-t0)/1000);
+    const a=$('#a'); a.src=URL.createObjectURL(blob);
+    a.onloadedmetadata=()=>{const rtf=a.duration?(secs/a.duration).toFixed(3):'?';
+      $('#status').textContent=`완료 · ${secs.toFixed(1)}s 합성 / ${a.duration.toFixed(1)}s 오디오 · RTF ${rtf}`;};
+    a.play().catch(()=>{});
+  }catch(e){$('#status').textContent='요청 실패: '+e;}finally{b.disabled=false;}
+};
+</script></body></html>"""
+
+
+@app.get('/', response_class=HTMLResponse)
+def demo():
+    return DEMO_HTML
 
 
 @app.get('/health')
