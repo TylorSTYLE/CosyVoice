@@ -60,3 +60,35 @@ ENV HSA_OVERRIDE_GFX_VERSION=11.5.1 \
 COPY deploy/strixhalo/smoke_gpu.py /opt/smoke_gpu.py
 # Smoke runs at `docker run` (needs /dev/kfd), not at build time.
 CMD ["python", "/opt/smoke_gpu.py"]
+
+# ============================================================
+# Stage: cosyvoice-eager  (Phase 2 revised — measure eager RTF before vLLM)
+# Full CosyVoice3 pipeline on gfx1151 torch, NO vLLM / TensorRT / JIT.
+# ============================================================
+FROM rocm-torch AS cosyvoice-eager
+
+# torchaudio: gfx1151 ROCm build. --no-deps so its exact-torch pin can't try to
+# swap the already-installed torch 2.9.1 (index only has torchaudio 2.9.0).
+RUN uv pip install --pre --no-deps torchaudio==2.9.0+rocm7.13.0rc2 \
+        --index-url https://rocm.prereleases.amd.com/whl/gfx1151/
+
+# CosyVoice runtime deps (CUDA/TRT/train stripped). constraints hold torch/torchaudio/
+# numpy; unsafe-best-match lets the constrained torch versions resolve from the ROCm
+# index while everything else comes from PyPI.
+COPY deploy/strixhalo/requirements-strix.txt deploy/strixhalo/constraints-strix.txt /tmp/
+RUN uv pip install -r /tmp/requirements-strix.txt \
+        --constraint /tmp/constraints-strix.txt \
+        --extra-index-url https://rocm.prereleases.amd.com/whl/gfx1151/ \
+        --index-strategy unsafe-best-match
+
+# App source. NOTE: third_party/Matcha-TTS must be populated on the host first:
+#   git submodule update --init --recursive
+WORKDIR /opt/CosyVoice
+COPY cosyvoice /opt/CosyVoice/cosyvoice
+COPY third_party /opt/CosyVoice/third_party
+COPY asset /opt/CosyVoice/asset
+COPY deploy/strixhalo/bench_cosyvoice.py /opt/CosyVoice/bench_cosyvoice.py
+ENV PYTHONPATH=/opt/CosyVoice:/opt/CosyVoice/third_party/Matcha-TTS \
+    HF_HOME=/cache/hf
+
+CMD ["python", "bench_cosyvoice.py"]
