@@ -53,6 +53,9 @@ PROMPT_TEXT = os.environ.get(
     'You are a helpful assistant.<|endofprompt|>希望你以后能够做的比我还好呦。')
 FP16 = os.environ.get('COSYVOICE_FP16', '1') not in ('0', 'false', 'False', '')
 MODEL_ID = os.environ.get('COSYVOICE_MODEL_ID', 'cosyvoice3-0.5b')
+# Fixed seed -> deterministic token count -> stable flow/HiFi-GAN conv shapes -> MIOpen
+# kernel-cache hits on repeated text (big win for canned phrases). Set -1 to randomize.
+SEED = int(os.environ.get('COSYVOICE_SEED', '0'))
 SUPPORTED_FORMATS = {'mp3': 'audio/mpeg', 'wav': 'audio/wav'}
 
 
@@ -88,17 +91,31 @@ def encode(pcm: np.ndarray, sr: int, response_format: str) -> bytes:
 # ----------------------------- CosyVoice engine (server-only) -----------------------------
 class CosyVoiceEngine:
     def __init__(self, model_dir=MODEL_DIR, prompt_wav=PROMPT_WAV,
-                 prompt_text=PROMPT_TEXT, fp16=FP16):
+                 prompt_text=PROMPT_TEXT, fp16=FP16, seed=SEED):
         import sys
         sys.path.append('third_party/Matcha-TTS')
         from cosyvoice.cli.cosyvoice import AutoModel
+        from cosyvoice.utils.common import set_all_random_seed
+        self._set_seed = set_all_random_seed
+        self.seed = seed
         self.prompt_wav = prompt_wav
         self.prompt_text = prompt_text
         self.model = AutoModel(model_dir=model_dir, load_trt=False, load_vllm=False, fp16=fp16)
         self.sr = self.model.sample_rate
+        self._warmup()
+
+    def _warmup(self):
+        """Precompile base MIOpen kernels so the first real request isn't a cold ~40s compile."""
+        try:
+            self.synth('안녕하세요. 반갑습니다.')
+        except Exception as e:  # pragma: no cover - warmup is best-effort
+            import logging
+            logging.warning('warmup synth failed (non-fatal): %s', e)
 
     def synth(self, text: str, speed: float = 1.0):
         """Return (pcm_int16 (N,), sample_rate)."""
+        if self.seed >= 0:
+            self._set_seed(self.seed)
         chunks = []
         for out in self.model.inference_zero_shot(
                 text, self.prompt_text, self.prompt_wav, stream=False, speed=speed):
