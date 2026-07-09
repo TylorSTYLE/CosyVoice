@@ -102,6 +102,7 @@ ENV PYTHONPATH=/opt/CosyVoice:/opt/CosyVoice/third_party/Matcha-TTS \
     HF_HOME=/cache/hf \
     MODELSCOPE_CACHE=/cache/modelscope \
     MIOPEN_USER_DB_PATH=/cache/miopen \
-    MIOPEN_CUSTOM_CACHE_DIR=/cache/miopen
+    MIOPEN_CUSTOM_CACHE_DIR=/cache/miopen \
+    MIOPEN_FIND_MODE=NORMAL
 
 CMD ["python", "bench_cosyvoice.py"]

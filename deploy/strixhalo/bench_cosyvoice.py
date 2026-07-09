@@ -34,6 +34,12 @@ def _sf_save(filepath, src, sample_rate, *args, **kwargs):
 torchaudio.load = _sf_load
 torchaudio.save = _sf_save
 
+# Let MIOpen (torch maps cudnn->MIOpen on ROCm) search + cache the fastest conv
+# algorithm per shape instead of the immediate-mode GemmFwdRest fallback that
+# dominates flow/HiFi-GAN time on gfx1151. Pairs with MIOPEN_FIND_MODE + a
+# persisted MIOPEN_USER_DB_PATH so repeated shapes reuse tuned kernels.
+torch.backends.cudnn.benchmark = True
+
 from cosyvoice.cli.cosyvoice import AutoModel
 from cosyvoice.utils.common import set_all_random_seed
 
@@ -53,6 +59,7 @@ def main() -> None:
     ap.add_argument('--warmup', type=int, default=1)
     ap.add_argument('--runs', type=int, default=3)
     ap.add_argument('--fp16', action='store_true', help='load model in fp16 (default fp32)')
+    ap.add_argument('--stream', action='store_true', help='streaming synthesis (fixed chunk shapes)')
     args = ap.parse_args()
 
     print(f'torch {torch.__version__} | cuda(rocm) available: {torch.cuda.is_available()} | fp16={args.fp16}')
@@ -85,16 +92,24 @@ def main() -> None:
     print(f'sample_rate={sr}  mode={args.mode}  text="{args.text}"')
 
     def synth():
+        """Return (wav, time_to_first_chunk). ttfc is the 'live' latency metric."""
         if args.mode == 'cross_lingual':
-            gen = model.inference_cross_lingual(args.text, args.prompt_wav, stream=False)
+            gen = model.inference_cross_lingual(args.text, args.prompt_wav, stream=args.stream)
         else:
-            gen = model.inference_zero_shot(args.text, args.prompt_text, args.prompt_wav, stream=False)
-        chunks = [o['tts_speech'] for o in gen]
-        return torch.cat(chunks, dim=1)
+            gen = model.inference_zero_shot(args.text, args.prompt_text, args.prompt_wav, stream=args.stream)
+        chunks, ttfc = [], None
+        t0 = time.time()
+        for o in gen:
+            if ttfc is None:
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                ttfc = time.time() - t0
+            chunks.append(o['tts_speech'])
+        return torch.cat(chunks, dim=1), ttfc
 
     for w in range(args.warmup):
         set_all_random_seed(0)
-        _ = synth()
+        _, _ = synth()
         print(f'[warmup {w}] done')
 
     best_rtf, wav = None, None
@@ -102,7 +117,7 @@ def main() -> None:
         set_all_random_seed(r)
         t2w['t'] = 0.0
         t = time.time()
-        wav = synth()
+        wav, ttfc = synth()
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         el = time.time() - t
@@ -112,7 +127,7 @@ def main() -> None:
         llm_rest = el - flow_hift
         best_rtf = rtf if best_rtf is None else min(best_rtf, rtf)
         print(f'[run {r}] synth {el:.2f}s | audio {dur:.2f}s | RTF {rtf:.3f} '
-              f'| flow+hift(token2wav) {flow_hift:.2f}s | llm+rest {llm_rest:.2f}s')
+              f'| ttfc {ttfc:.2f}s | flow+hift(token2wav) {flow_hift:.2f}s | llm+rest {llm_rest:.2f}s')
 
     print(f'[result] best RTF {best_rtf:.3f}  ({"REAL-TIME OK (<1.0)" if best_rtf < 1.0 else "SLOWER THAN REAL-TIME"})')
 
