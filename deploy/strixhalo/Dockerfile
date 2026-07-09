@@ -75,11 +75,16 @@ RUN uv pip install --pre --no-deps torchaudio==2.9.0+rocm7.13.0rc2 \
 # CosyVoice runtime deps (CUDA/TRT/train stripped). constraints hold torch/torchaudio/
 # numpy; unsafe-best-match lets the constrained torch versions resolve from the ROCm
 # index while everything else comes from PyPI.
+# setuptools<81 + wheel are pre-installed so legacy sdists (openai-whisper imports
+# pkg_resources, dropped in setuptools 81) build via --no-build-isolation. The
+# setuptools<81 pin in constraints keeps it from being upgraded mid-resolution.
 COPY deploy/strixhalo/requirements-strix.txt deploy/strixhalo/constraints-strix.txt /tmp/
+RUN uv pip install "setuptools<81" wheel
 RUN uv pip install -r /tmp/requirements-strix.txt \
         --constraint /tmp/constraints-strix.txt \
         --extra-index-url https://rocm.prereleases.amd.com/whl/gfx1151/ \
-        --index-strategy unsafe-best-match
+        --index-strategy unsafe-best-match \
+        --no-build-isolation
 
 # App source. NOTE: third_party/Matcha-TTS must be populated on the host first:
 #   git submodule update --init --recursive
