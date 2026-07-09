@@ -43,9 +43,12 @@ def main() -> None:
     ap.add_argument('--model_dir', default=os.environ.get('COSYVOICE_MODEL_DIR', '/models/Fun-CosyVoice3-0.5B'))
     ap.add_argument('--prompt_wav', default='asset/zero_shot_prompt.wav')
     ap.add_argument('--text', default='안녕하세요. 오늘 날씨가 정말 좋네요. 우리 함께 공원으로 산책하러 갈까요?')
-    ap.add_argument('--mode', choices=['cross_lingual', 'zero_shot'], default='cross_lingual')
-    ap.add_argument('--prompt_text', default='希望你以后能够做的比我还好呦。',
-                    help='transcript of prompt_wav (only for --mode zero_shot)')
+    ap.add_argument('--mode', choices=['zero_shot', 'cross_lingual'], default='zero_shot')
+    # CosyVoice3 asserts <|endofprompt|> (id 151646) is present in text/prompt_text.
+    # Format mirrors vllm_example.py: "<instruct><|endofprompt|><prompt_transcript>".
+    ap.add_argument('--prompt_text',
+                    default='You are a helpful assistant.<|endofprompt|>希望你以后能够做的比我还好呦。',
+                    help='CosyVoice3 requires <|endofprompt|> here (zero_shot mode)')
     ap.add_argument('--out', default='/out/cosy_kr_eager.wav')
     ap.add_argument('--warmup', type=int, default=1)
     ap.add_argument('--runs', type=int, default=3)
