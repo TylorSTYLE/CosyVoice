@@ -139,11 +139,35 @@ wetext 프론트엔드 사용. torch `2.9.1+rocm7.13.0rc2`, hip `7.13.99004`.
 **Phase 3 게이트 PASS ✅**: 한국어 wav 합성·재생 성공(zero_shot, 중국어 프롬프트 클립로 cross-lingual
 KR). → 최대 위험 #1(stock 휠 SIGSEGV) 완전 제거, 전체 파이프라인 gfx1151 동작 확인.
 
-### RTF (붙여넣기 대기)
-```
-# bench 출력의 [run N] ... RTF / [result] best RTF 라인
-```
-이 수치로 Phase 2 go/no-go: RTF<1.0 → vLLM 건너뛰고 Phase 4 서빙 / RTF≥1.0 → Phase 2b vLLM.
+### RTF 실측 (2026-07-10) — 대표 한국어 문장, audio ~6s, token2wav=flow+hift 계측
+| 실행 | RTF | flow+hift(token2wav) | llm+rest | 비고 |
+|---|---|---|---|---|
+| fp32 run0* | 1.17 | 1.60s | 5.56s | *seed0=warmup shape 히트 |
+| fp32 run1/2 | 2.4 | 8–9s | ~5s | 새 shape |
+| **fp16 run0*** | **0.47** | **0.41s** | **2.50s** | 실시간 달성(shape 히트) |
+| fp16 run1/2 | 1.64 | 7–7.5s | ~2.2s | 새 shape, flow/hift 지배 |
+
+### Phase 2 go/no-go 결론: **vLLM은 이 문제의 열쇠가 아니다** (데이터 근거)
+- **LLM AR 디코드는 병목이 아님**: fp16 로 `llm+rest` 가 5.5s→2.2s. (원래 가설의 hipMemcpyWithStream
+  붕괴는 이 ROCm 7.13 네이티브 스택에서 관측되지 않음 — Phase1 프록시 sync 1.16× 와 일관.)
+- **진짜 병목 = flow(DiT)+HiFi-GAN 의 conv (token2wav)**: 새 utterance shape 마다 7–9s. 원인은
+  MIOpen 이 gfx1151 튜닝 perf-db(`gfx1151_20.HIP.fdb.txt`) 부재로 immediate-mode 폴백(GemmFwdRest,
+  workspace 부족)을 쓰기 때문. **LLM 과 무관 → vLLM 으로 해결 불가.**
+- **shape 캐시 히트 시 fp16 RTF 0.47** (token2wav 0.41s) → 실시간은 실제로 가능. 관건은 flow/hift
+  conv 를 일관되게 빠르게 만드는 것(MIOpen 튜닝/캐시, cudnn.benchmark, 스트리밍 고정 chunk shape).
+- **∴ vLLM 소스빌드(Phase 2b 원안)는 투자 대비 실익 없음** (LLM 이미 충분히 빠름). 최적화 축을
+  **fp16 + flow/hift MIOpen + 스트리밍**으로 전환 권고.
+
+### 다음 후보(값 미검증, 서버 실측 필요)
+- `torch.backends.cudnn.benchmark=True` + `MIOPEN_FIND_MODE=NORMAL` + 영속 user-db → conv 알고리즘
+  탐색·캐시(같은 shape 재사용 빨라짐).
+- **스트리밍(stream=True)**: 고정 크기 chunk 로 flow 호출 → MIOpen shape 안정 → 일관 속도 + 낮은
+  first-audio 지연('라이브'에 부합).
+- flow n_timesteps(DiT 스텝) 축소(품질/속도 트레이드오프).
+
+## Phase 2b — vLLM 소스빌드 (보류)
+Phase 2 데이터상 LLM 은 병목 아님 → vLLM 은 실시간 달성에 불필요. 필요 시(대량 동시 요청 배칭 등)
+재검토. 현재 최적화 축은 flow/hift + fp16 + 스트리밍으로 전환.
 
 ## Phase 2b — vLLM 소스빌드 (필요 판정 시, GO/NO-GO)
 (eager RTF 결과에 따라)
