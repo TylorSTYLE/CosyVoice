@@ -12,11 +12,9 @@ services:
     # gfx1151 passthrough. IMPORTANT: unlike `docker run --device /dev/dri` (which
     # recurses into the dir), compose `devices` does NOT recurse — list the specific
     # nodes or torch.cuda.is_available() will be False and the model silently runs on CPU.
-    # GPU passthrough. In this docker/compose version, NO `devices:` variant (short form,
-    # per-node, mapping form, +device_cgroup_rules) granted torch GPU access — the nodes
-    # appear in the container but torch.cuda stays False (cgroup-v2 device-allow not applied
-    # the way `docker run --device` does it). privileged bypasses the device cgroup entirely.
-    privileged: true
+    # GPU passthrough — same mapping form the host's working Ollama uses.
+    # (Earlier cuda-False was NOT a device issue: a blank HSA_OVERRIDE_GFX_VERSION in .env
+    #  was clobbering the image's 11.5.1 and breaking ROCm. Fixed in .env.example.)
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri
