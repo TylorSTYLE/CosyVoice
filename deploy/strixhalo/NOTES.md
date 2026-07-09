@@ -49,21 +49,31 @@
 
 ### 확정 스택 (버전·URL 실조회, 2026-07-09 — 출처 하단)
 - **Base**: `ubuntu:26.04`.
-- **ROCm userspace**: TheRock **나이틀리 gfx1151 타르볼**(S3, `therock-dist-linux-gfx1151-7.*`)를
-  `/opt/rocm` 로 풀기. 호스트 `/opt/rocm` 불필요(컨테이너가 전부 반입). 스크립트가 최신 tarball 자동 해석.
-- **PyTorch**: AMD **prerelease 인덱스** `https://rocm.prereleases.amd.com/whl/gfx1151/` 의
-  네이티브 휠(`--pre torch torchaudio`, 현재 해석값 `torch 2.9.1+rocm7.13.0rc2`). **stock pytorch.org
-  ROCm 휠 금지**(gfx1151 SIGSEGV). repo.radeon.com 은 gfx1151 미제공(gfx1100 전용) → 사용 금지.
-- **Python**: **3.10**(uv 로 standalone CPython 프로비저닝). 인덱스에 cp310 휠 존재 확인. CosyVoice
-  생태계(ttsfrd/deepspeed/requirements)가 3.10 기준이라 채택(hec-ovi 의 3.12 대신 의도적 선택).
-- **numpy**: 1.26.4 (torch 뒤에 PyPI 에서 설치, 인덱스는 first-index 전략으로 torch 만 rocm 인덱스).
+- **ROCm userspace**: ~~TheRock S3 tarball~~ → **AMD prerelease pip 인덱스로 통일**(아래 1차 빌드
+  실패 교훈). 인덱스 `https://rocm.prereleases.amd.com/whl/gfx1151/` 가 **런타임+devel 툴체인을 모두
+  호스팅**: `rocm-sdk-libraries-gfx1151`(런타임), `rocm-sdk-devel`(hipcc/헤더, Phase 2 vLLM 빌드용),
+  `rocm-sdk-core`. torch 휠이 self-contained → **시스템 `/opt/rocm` 불필요, S3 tarball 불필요**.
+- **PyTorch**: prerelease 인덱스 네이티브 휠. Phase 1 핀 `torch==2.9.1+rocm7.13.0rc2`(cp310, 존재 확인).
+  torch 가 `rocm-sdk-libraries-gfx1151` 를 dep 으로 자동 반입. **stock pytorch.org ROCm 휠 금지**
+  (gfx1151 SIGSEGV). repo.radeon.com gfx1151 미제공(gfx1100 전용) → 사용 금지.
+- **Python**: **3.10**(uv standalone). 인덱스 cp310 휠 존재. CosyVoice 생태계가 3.10 기준.
+- **numpy**: 1.26.4 (torch 뒤 PyPI 에서 설치).
+
+### 1차 빌드 실패 & 전환 (2026-07-09, 서버)
+- 증상: `RUN install_rocm_sdk.sh` 에서 `curl: (6) Could not resolve host:
+  therock-nightly-tarball.s3.amazonaws.com`. 동일 빌드에서 apt/astral.sh/ubuntu 는 정상 resolve
+  → 일반 DNS 정상, **그 S3 버킷 호스트명이 틀림**(리서치 서브에이전트의 미검증 URL).
+- 근본 대응: S3 tarball 경로 **폐기**. prerelease pip 인덱스가 런타임·devel 을 다 제공함을 실조회로
+  확인(위) → `install_rocm_sdk.sh` 삭제, Phase 1 은 `uv pip install --pre torch==...` 만으로 구성.
+- 교훈: ROCm 조달을 pip 인덱스 하나로 단일화(Phase 2 devel 도 `rocm-sdk-devel` pip 로).
 - **핵심 gfx1151 env**: `PYTORCH_ROCM_ARCH=gfx1151`, `HSA_OVERRIDE_GFX_VERSION=11.5.1`(하이브리드
   안전값, 네이티브면 무해), `VLLM_ROCM_USE_AITER=0`(CDNA 전용 커널 → gfx1151 프리즈 회피),
   `ROCBLAS_USE_HIPBLASLT=1`, `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`, `HIP_FORCE_DEV_KERNARG=1`.
 
 ### 만든 파일 (로컬)
-- `Dockerfile`(멀티스테이지, 현재 `rocm-torch` 스테이지만) · `scripts/install_rocm_sdk.sh`(S3 최신
-  tarball 해석·설치) · `smoke_gpu.py`(matmul 정합성 + AR 디코드 프록시 마이크로벤치) · 루트 `.dockerignore`.
+- `Dockerfile`(멀티스테이지, 현재 `rocm-torch` 스테이지만 — SDK tarball 없이 pip 인덱스 torch) ·
+  `smoke_gpu.py`(matmul 정합성 + AR 디코드 프록시 마이크로벤치) · 루트 `.dockerignore`.
+  (`scripts/install_rocm_sdk.sh` 는 1차 빌드 실패 후 삭제 — pip 인덱스로 대체.)
 
 ### 서버 실행 결과 (붙여넣기 대기)
 ```
@@ -104,7 +114,9 @@ gfx1151 hipMemcpyWithStream 병목 베이스라인 → Phase 2 vLLM 이 이걸 �
 - vLLM 버전: **0.11.0(V1) 우선**, 단 0.11.0 `requirements/rocm.txt` 가 torch==2.8.0 핀 → TheRock
   torch 2.9.1 과 충돌 가능. 실패 시 **HEAD(0.19.2rc1)** 로 폴백(gfx1151 실증된 유일 조합). 서버에서
   `git checkout v0.11.0` + `patch_strix.py` + `--constraint`(torch 2.9.1 핀) `--no-deps` 빌드로 먼저 시도.
+- vLLM 빌드 툴체인: `pip install rocm-sdk-devel`(인덱스) 로 hipcc/clang/헤더 확보(S3 tarball 대신).
+  ROCm 경로는 `rocm-sdk path --root` / `--bin` 으로 해석(설치 위치가 venv site-packages 하위).
 - vLLM 빌드 env: `VLLM_TARGET_DEVICE=rocm`, `PYTORCH_ROCM_ARCH=gfx1151`, `HIP_ARCHITECTURES=gfx1151`,
-  `GPU_TARGETS=gfx1151`, `CC/CXX=/opt/rocm/llvm/bin/clang(++)`, `CMAKE_ARGS=-DGPU_TARGETS=gfx1151 ...`.
+  `GPU_TARGETS=gfx1151`, `CC/CXX=<rocm-sdk path --bin>/clang(++)`, `CMAKE_ARGS=-DGPU_TARGETS=gfx1151 ...`.
 - 런타임: `--enforce-eager`(HIP graph 프리즈 회피), `--enable-prompt-embeds --skip-tokenizer-init`.
 - 미검증 리스크: 0.11.0 vs torch 2.9.1 ABI, numpy 1.26.4 vs 최신 deps 충돌 → 서버에서 실측.
