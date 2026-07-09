@@ -66,6 +66,13 @@
 - 근본 대응: S3 tarball 경로 **폐기**. prerelease pip 인덱스가 런타임·devel 을 다 제공함을 실조회로
   확인(위) → `install_rocm_sdk.sh` 삭제, Phase 1 은 `uv pip install --pre torch==...` 만으로 구성.
 - 교훈: ROCm 조달을 pip 인덱스 하나로 단일화(Phase 2 devel 도 `rocm-sdk-devel` pip 로).
+
+### 2차 빌드 실패 & 전환 (2026-07-09, 서버)
+- 증상: `uv pip install --pre torch==2.9.1+rocm7.13.0rc2 --index-url <rocm> --extra-index-url pypi`
+  → `No solution found ... torch was found on pypi but not at the requested version`. uv 기본
+  first-index 전략이 `torch` 를 pypi 에서 먼저 잡아 `+rocm` local 버전을 못 찾음.
+- 대응: **pypi extra 제거, rocm 인덱스 단독**. 그 인덱스가 torch deps + 런타임까지 전부 호스팅 확인됨.
+  numpy==1.26.4 는 스모크 불필요 → Phase 1 에서 제거(CosyVoice 런타임 스테이지로 이동).
 - **핵심 gfx1151 env**: `PYTORCH_ROCM_ARCH=gfx1151`, `HSA_OVERRIDE_GFX_VERSION=11.5.1`(하이브리드
   안전값, 네이티브면 무해), `VLLM_ROCM_USE_AITER=0`(CDNA 전용 커널 → gfx1151 프리즈 회피),
   `ROCBLAS_USE_HIPBLASLT=1`, `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`, `HIP_FORCE_DEV_KERNARG=1`.

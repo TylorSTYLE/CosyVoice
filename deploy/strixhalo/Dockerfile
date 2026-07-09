@@ -39,12 +39,15 @@ ENV PATH="/opt/venv/bin:${PATH}"
 # added later in the vllm stage to source-build vLLM.) NEVER use pytorch.org stock
 # ROCm wheels here — they SIGSEGV (exit 139) on gfx1151.
 # Index confirmed to host torch(cp310) + rocm-sdk-libraries-gfx1151 + rocm-sdk-devel.
+# SINGLE index only. The gfx1151 index also hosts torch's pure-python deps
+# (filelock, sympy, networkx, numpy, typing-extensions, ...) and the ROCm runtime,
+# so PyPI is not needed. Do NOT add `--extra-index-url https://pypi.org/simple`:
+# uv's first-index strategy would then resolve `torch` from PyPI (which lacks the
+# `+rocm7.13.0rc2` local version) and fail. numpy 1.26.4 (CosyVoice's pin) is
+# installed later in the runtime stage — the Phase 1 smoke doesn't need it.
 ARG TORCH_PIN="torch==2.9.1+rocm7.13.0rc2"
 RUN uv pip install --pre ${TORCH_PIN} \
-        --index-url https://rocm.prereleases.amd.com/whl/gfx1151/ \
-        --extra-index-url https://pypi.org/simple
-# CosyVoice needs numpy 1.26.4 (from PyPI; overrides any newer numpy pulled as a dep)
-RUN uv pip install numpy==1.26.4
+        --index-url https://rocm.prereleases.amd.com/whl/gfx1151/
 
 # gfx1151 runtime env (from hec-ovi; harmless if a native build doesn't need them)
 ENV HSA_OVERRIDE_GFX_VERSION=11.5.1 \
