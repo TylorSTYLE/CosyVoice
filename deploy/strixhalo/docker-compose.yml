@@ -1,0 +1,39 @@
+# CosyVoice3 OpenAI-compatible TTS on AMD Strix Halo (gfx1151).
+# Run on the server:  cd deploy/strixhalo && cp .env.example .env && docker compose up -d --build
+# Prereqs: git submodule update --init --recursive; model in the cosy_models volume
+#          (see README.md "Model download").
+services:
+  cosyvoice-tts:
+    build:
+      context: ../..                      # repo root (Dockerfile COPYs cosyvoice/, third_party/, asset/)
+      dockerfile: deploy/strixhalo/Dockerfile
+      target: serve
+    image: cosyvoice-strix:serve
+    # gfx1151 passthrough, same as Ollama (device-only; container runs as root).
+    # If non-root device access ever fails, uncomment group_add with the host GIDs
+    # (checked on this server: render=993, video=44).
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    # group_add: ["993", "44"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      COSYVOICE_MODEL_DIR: /models/Fun-CosyVoice3-0.5B
+      COSYVOICE_FP16: "1"
+      SERVE_PORT: "8000"
+    ports:
+      - "${SERVE_PORT:-8000}:8000"
+    volumes:
+      - cosy_models:/models          # pretrained model (downloaded once, see README)
+      - cosy_hf:/cache/hf            # HF cache
+      - cosy_ms:/cache/modelscope    # wetext / modelscope cache
+      - cosy_miopen:/cache/miopen    # MIOpen kernel cache (persist across restarts)
+    restart: unless-stopped
+
+volumes:
+  cosy_models:
+  cosy_hf:
+  cosy_ms:
+  cosy_miopen:

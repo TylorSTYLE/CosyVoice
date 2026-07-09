@@ -18,7 +18,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl git \
+        ca-certificates curl git ffmpeg \
         build-essential cmake ninja-build pkg-config \
         libnuma1 libnuma-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -98,10 +98,21 @@ COPY cosyvoice /opt/CosyVoice/cosyvoice
 COPY third_party /opt/CosyVoice/third_party
 COPY asset /opt/CosyVoice/asset
 COPY deploy/strixhalo/bench_cosyvoice.py /opt/CosyVoice/bench_cosyvoice.py
+COPY deploy/strixhalo/server.py /opt/CosyVoice/server.py
 ENV PYTHONPATH=/opt/CosyVoice:/opt/CosyVoice/third_party/Matcha-TTS \
     HF_HOME=/cache/hf \
     MODELSCOPE_CACHE=/cache/modelscope \
     MIOPEN_USER_DB_PATH=/cache/miopen \
-    MIOPEN_CUSTOM_CACHE_DIR=/cache/miopen
+    MIOPEN_CUSTOM_CACHE_DIR=/cache/miopen \
+    COSYVOICE_MODEL_DIR=/models/Fun-CosyVoice3-0.5B \
+    COSYVOICE_FP16=1
 
 CMD ["python", "bench_cosyvoice.py"]
+
+# ============================================================
+# Stage: serve  (Phase 4 — OpenAI-compatible /v1/audio/speech)
+# ============================================================
+FROM cosyvoice-eager AS serve
+ENV SERVE_PORT=8000
+EXPOSE 8000
+CMD ["python", "server.py"]
