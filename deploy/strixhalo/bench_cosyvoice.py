@@ -52,16 +52,32 @@ def main() -> None:
     ap.add_argument('--out', default='/out/cosy_kr_eager.wav')
     ap.add_argument('--warmup', type=int, default=1)
     ap.add_argument('--runs', type=int, default=3)
+    ap.add_argument('--fp16', action='store_true', help='load model in fp16 (default fp32)')
     args = ap.parse_args()
 
-    print(f'torch {torch.__version__} | cuda(rocm) available: {torch.cuda.is_available()}')
+    print(f'torch {torch.__version__} | cuda(rocm) available: {torch.cuda.is_available()} | fp16={args.fp16}')
     if torch.cuda.is_available():
         print('device:', torch.cuda.get_device_name(0))
 
     t0 = time.time()
     # CosyVoice3 has NO load_jit param; pass only load_trt/load_vllm/fp16 (all False = eager).
-    model = AutoModel(model_dir=args.model_dir, load_trt=False, load_vllm=False, fp16=False)
+    model = AutoModel(model_dir=args.model_dir, load_trt=False, load_vllm=False, fp16=args.fp16)
     print(f'[load] {time.time() - t0:.1f}s')
+
+    # Split the pipeline: time token2wav (flow DiT + HiFi-GAN) vs the rest (LLM AR
+    # decode + frontend). This decides whether vLLM (LLM-only) is even the right lever.
+    t2w = {'t': 0.0}
+    _orig_token2wav = model.model.token2wav
+
+    def _timed_token2wav(*a, **k):
+        s = time.perf_counter()
+        r = _orig_token2wav(*a, **k)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        t2w['t'] += time.perf_counter() - s
+        return r
+
+    model.model.token2wav = _timed_token2wav
 
     sr = model.sample_rate
     # This fork's inference_* take the prompt as a FILE PATH (see vllm_example.py);
@@ -84,13 +100,19 @@ def main() -> None:
     best_rtf, wav = None, None
     for r in range(args.runs):
         set_all_random_seed(r)
+        t2w['t'] = 0.0
         t = time.time()
         wav = synth()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         el = time.time() - t
         dur = wav.shape[1] / sr
         rtf = el / dur
+        flow_hift = t2w['t']
+        llm_rest = el - flow_hift
         best_rtf = rtf if best_rtf is None else min(best_rtf, rtf)
-        print(f'[run {r}] synth {el:.2f}s | audio {dur:.2f}s | RTF {rtf:.3f}')
+        print(f'[run {r}] synth {el:.2f}s | audio {dur:.2f}s | RTF {rtf:.3f} '
+              f'| flow+hift(token2wav) {flow_hift:.2f}s | llm+rest {llm_rest:.2f}s')
 
     print(f'[result] best RTF {best_rtf:.3f}  ({"REAL-TIME OK (<1.0)" if best_rtf < 1.0 else "SLOWER THAN REAL-TIME"})')
 

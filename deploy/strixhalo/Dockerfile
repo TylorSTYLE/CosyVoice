@@ -100,6 +100,8 @@ COPY asset /opt/CosyVoice/asset
 COPY deploy/strixhalo/bench_cosyvoice.py /opt/CosyVoice/bench_cosyvoice.py
 ENV PYTHONPATH=/opt/CosyVoice:/opt/CosyVoice/third_party/Matcha-TTS \
     HF_HOME=/cache/hf \
-    MODELSCOPE_CACHE=/cache/modelscope
+    MODELSCOPE_CACHE=/cache/modelscope \
+    MIOPEN_USER_DB_PATH=/cache/miopen \
+    MIOPEN_CUSTOM_CACHE_DIR=/cache/miopen
 
 CMD ["python", "bench_cosyvoice.py"]
