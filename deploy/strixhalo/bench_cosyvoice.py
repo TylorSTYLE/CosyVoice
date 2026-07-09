@@ -16,6 +16,24 @@ import argparse
 sys.path.append('third_party/Matcha-TTS')
 import torch
 import torchaudio
+import soundfile as sf
+
+# torchaudio 2.9 routes load()/save() through TorchCodec, which isn't installed
+# (no ROCm/gfx1151 build). CosyVoice calls torchaudio.load(..., backend='soundfile');
+# shim both to soundfile (already a dep) so we don't touch cosyvoice core.
+def _sf_load(filepath, *args, **kwargs):
+    data, samplerate = sf.read(filepath, dtype='float32', always_2d=True)  # (frames, ch)
+    return torch.from_numpy(data.T).contiguous(), samplerate               # (ch, frames)
+
+
+def _sf_save(filepath, src, sample_rate, *args, **kwargs):
+    arr = src.detach().cpu().numpy()
+    sf.write(filepath, arr.T if arr.ndim == 2 else arr, sample_rate)
+
+
+torchaudio.load = _sf_load
+torchaudio.save = _sf_save
+
 from cosyvoice.cli.cosyvoice import AutoModel
 from cosyvoice.utils.file_utils import load_wav
 from cosyvoice.utils.common import set_all_random_seed
