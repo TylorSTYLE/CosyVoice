@@ -79,7 +79,10 @@ RUN uv pip install --pre --no-deps torchaudio==2.9.0+rocm7.13.0rc2 \
 # pkg_resources, dropped in setuptools 81) build via --no-build-isolation. The
 # setuptools<81 pin in constraints keeps it from being upgraded mid-resolution.
 COPY deploy/strixhalo/requirements-strix.txt deploy/strixhalo/constraints-strix.txt /tmp/
-RUN uv pip install "setuptools<81" wheel
+# Pre-seed build deps for legacy sdists built under --no-build-isolation:
+#   setuptools<81 -> pkg_resources (openai-whisper);  numpy+cython -> pyworld.
+# numpy is pinned to CosyVoice's version so it isn't churned by the main install.
+RUN uv pip install "setuptools<81" wheel "numpy==1.26.4" cython
 RUN uv pip install -r /tmp/requirements-strix.txt \
         --constraint /tmp/constraints-strix.txt \
         --extra-index-url https://rocm.prereleases.amd.com/whl/gfx1151/ \
