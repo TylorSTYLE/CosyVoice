@@ -9,13 +9,16 @@ services:
       dockerfile: deploy/strixhalo/Dockerfile
       target: serve
     image: cosyvoice-strix:serve
-    # gfx1151 passthrough, same as Ollama (device-only; container runs as root).
-    # If non-root device access ever fails, uncomment group_add with the host GIDs
-    # (checked on this server: render=993, video=44).
+    # gfx1151 passthrough. IMPORTANT: unlike `docker run --device /dev/dri` (which
+    # recurses into the dir), compose `devices` does NOT recurse — list the specific
+    # nodes or torch.cuda.is_available() will be False and the model silently runs on CPU.
     devices:
       - /dev/kfd
-      - /dev/dri
-    # group_add: ["993", "44"]
+      - /dev/dri/renderD128   # ROCm compute node (required)
+      - /dev/dri/card1
+    group_add:
+      - "993"   # render (host GID on this server)
+      - "44"    # video
     env_file:
       - path: .env
         required: false

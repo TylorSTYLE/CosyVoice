@@ -93,6 +93,14 @@ class CosyVoiceEngine:
     def __init__(self, model_dir=MODEL_DIR, prompt_wav=PROMPT_WAV,
                  prompt_text=PROMPT_TEXT, fp16=FP16, seed=SEED):
         import sys
+        # Fail fast instead of silently running on CPU (e.g. compose device passthrough
+        # not recursing into /dev/dri). Set COSYVOICE_REQUIRE_GPU=0 to allow CPU.
+        require_gpu = os.environ.get('COSYVOICE_REQUIRE_GPU', '1') not in ('0', 'false', 'False', '')
+        if require_gpu and not (torch is not None and torch.cuda.is_available()):
+            raise RuntimeError(
+                'GPU (ROCm/gfx1151) not visible to torch — refusing to run on CPU. '
+                'Check device passthrough (/dev/kfd + /dev/dri/renderD128) and group_add. '
+                'Set COSYVOICE_REQUIRE_GPU=0 to override.')
         sys.path.append('third_party/Matcha-TTS')
         from cosyvoice.cli.cosyvoice import AutoModel
         from cosyvoice.utils.common import set_all_random_seed
