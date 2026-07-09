@@ -16,6 +16,12 @@ services:
       - /dev/kfd
       - /dev/dri/renderD128   # ROCm compute node (required)
       - /dev/dri/card1
+    # `docker run --device` also inserts a cgroup allow rule; compose only creates the
+    # node, so the device cgroup controller blocks access (even for root) -> cuda False.
+    # Allow the char-device majors explicitly: 235=/dev/kfd, 226=/dev/dri.
+    device_cgroup_rules:
+      - 'c 235:* rmw'
+      - 'c 226:* rmw'
     group_add:
       - "993"   # render (host GID on this server)
       - "44"    # video
