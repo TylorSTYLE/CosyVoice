@@ -210,8 +210,34 @@ Phase 2 데이터상 LLM 은 병목 아님 → vLLM 은 실시간 달성에 불�
     MIOpen 첫 커널 컴파일 = 이미 규명된 novel-shape 페널티). warm(동일 문장 재요청) RTF 측정은 대기.
 - compose 볼륨은 명시적 name 으로 기존 cosy_models/hf/ms/miopen 재사용. 캐시 named volume 영속화 완료.
 
-### 대기: warm RTF + 재생 확인
-동일 문장 2번째 curl(캐시 warm) 시간 + mp3 재생(한국어 청취) 확인 → 기록 후 최종 완료.
+### 최종 검증 (2026-07-10) — 완료 정의 충족 ✅
+GPU 서빙 확인(compose, seed 고정 + startup warmup):
+- 1st 요청(해당 shape 일회성 MIOpen 컴파일 포함): **9.7s**
+- 2nd 요청(동일 텍스트 → seed 고정으로 동일 shape → MIOpen 캐시 히트): **2.72s, RTF 0.398**
+  (audio 6.08s, 로그 `rtf 0.3977`) = **실시간 2.5배**. 한국어 오디오 정상 재생.
+- 완료 정의: 서버 curl→KR mp3 ✅ / RTF<1.0(실측 0.40) ✅ / GPU 사용·무세그폴트 ✅.
+- 함의: **반복/정형 문구(HA 응답 등)는 캐시 히트로 실시간**. 새 문장 첫 합성은 그 shape 컴파일
+  비용(수~수십 초) 1회, 이후 동일 텍스트는 빠름(MIOpen 캐시 named volume 영속).
+
+### 서빙에서 잡은 함정 2가지 (중요)
+1. **`.env` 의 빈 `HSA_OVERRIDE_GFX_VERSION=` 가 이미지 ENV(11.5.1)를 덮어써 GPU 미인식**.
+   `env_file` 은 빈 값도 로드해 오버라이드 → ROCm 이 gfx1151 못 잡고 CPU 폴백(warmup 160s).
+   `.env.example` 에서 해당 줄 제거(이미지가 11.5.1 설정). **교훈: env_file 에 빈 변수 두지 말 것.**
+2. **compose `devices:` 가 이 docker 버전에서 GPU 접근을 제대로 못 줌**(노드는 보이나 cuda False).
+   `docker run --device` 는 정상. 위 #1 이 실제 근본 원인이었고, device 형식은 Ollama 와 동일한
+   `- /dev/kfd:/dev/kfd`, `- /dev/dri:/dev/dri` 매핑 형식 사용. server.py 에 GPU 미인식 시
+   즉시 실패하는 `COSYVOICE_REQUIRE_GPU` 가드 추가(CPU 조용한 폴백 방지).
+
+### 서버 개선 (server.py)
+- **고정 seed(COSYVOICE_SEED=0)**: 동일 텍스트→동일 토큰 길이→동일 conv shape→MIOpen 캐시 히트.
+- **startup warmup**: 첫 실요청의 콜드 컴파일 완화.
+- **GPU 가드**: torch.cuda 불가 시 명확한 에러로 기동 실패(CPU 폴백 차단).
+
+## 전체 결론
+- gfx1151 에서 **CosyVoice3 한국어 TTS 실시간 서빙 성립**(캐시 히트 RTF 0.40, OpenAI 호환 API).
+- **vLLM 불필요**(LLM 은 fp16 로 이미 빠름; 병목은 flow/hift MIOpen, vLLM 무관).
+- 남은 개선 여지: 새 문장 첫 합성의 shape 컴파일 비용 → flow 고정길이 버킷팅(core 수정)으로
+  일관 RTF 목표 가능(선택).
 
 ## Phase 5 — 마감
 (대기)

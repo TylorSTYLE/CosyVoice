@@ -6,11 +6,13 @@ and serves an OpenAI-compatible `/v1/audio/speech`. Build/run **on the server on
 
 ## Key results (measured, see NOTES.md)
 - ✅ Full pipeline (LLM → DiT flow → HiFi-GAN) runs on gfx1151, **no segfault**, intelligible Korean.
-- ✅ Real-time is achievable: **fp16 RTF ≈ 0.45** on a warm (cached-shape) utterance.
-- ⚠️ **Not consistently real-time**: each *new* utterance length pays a flow/HiFi-GAN
-  MIOpen conv penalty (~7s → RTF 1.6–2.4). It's a gfx1151 MIOpen limitation (the conv
-  falls back to an insufficient-workspace `GemmFwdRest` solver); `cudnn.benchmark`,
-  `MIOPEN_FIND_MODE=NORMAL`, and streaming did **not** fix it.
+- ✅ **Verified serving**: `docker compose up` → `curl /v1/audio/speech` → Korean mp3.
+  With the server's fixed seed, a **repeated phrase hits RTF ≈ 0.40** (6.08s audio in 2.72s) —
+  real-time for canned/repeated text (great for Home Assistant responses).
+- ⚠️ **First synth of a *new* text** pays a one-time flow/HiFi-GAN MIOpen conv compile for
+  that output length (~seconds–tens of seconds); the MIOpen kernel cache is persisted to a
+  named volume, so the same text is fast afterward. `cudnn.benchmark`, `MIOPEN_FIND_MODE=NORMAL`,
+  and streaming did **not** remove this per-shape cost (gfx1151 MIOpen limitation).
 - ❌ **vLLM is not the lever**: in fp16 the LLM is already fast (~2.2s incl. CPU frontend);
   the bottleneck is flow/HiFi-GAN, which vLLM does not touch. (The original
   "vLLM fixes the AR-decode memcpy bottleneck" hypothesis does not hold on this stack.)
@@ -32,11 +34,14 @@ git clone --recursive <your-fork>           # or: git submodule update --init --
 ## Build & run (docker compose)
 ```bash
 cd deploy/strixhalo
-cp .env.example .env            # optional; set HF_TOKEN / SERVE_PORT if needed
+cp .env.example .env            # set HF_TOKEN / SERVE_PORT (default host port 8880)
 docker compose up -d --build
 ```
-Device passthrough is `/dev/kfd` + `/dev/dri` (device-only, root container — same as
-Ollama). If access fails, uncomment `group_add: ["993","44"]` in `docker-compose.yml`.
+GPU passthrough uses the `/dev/kfd:/dev/kfd` + `/dev/dri:/dev/dri` mapping form (same as
+the host's Ollama). ⚠️ **Do not put a blank `HSA_OVERRIDE_GFX_VERSION=` in `.env`** — the
+image sets `11.5.1`, and env_file loading a blank value overrides it and breaks ROCm GPU
+detection (silent CPU fallback). `server.py` fails fast (`COSYVOICE_REQUIRE_GPU=1`) if the
+GPU isn't visible, so a misconfigured passthrough errors immediately instead of running on CPU.
 
 ### Model download (one-off, into the named volume)
 ```bash
@@ -47,10 +52,10 @@ snapshot_download('FunAudioLLM/Fun-CosyVoice3-0.5B-2512', local_dir='/models/Fun
 
 ## Use
 ```bash
-curl -s http://localhost:8000/health
-curl -s http://localhost:8000/v1/models
+curl -s http://localhost:8880/health
+curl -s http://localhost:8880/v1/models
 
-curl -s http://localhost:8000/v1/audio/speech \
+curl -s http://localhost:8880/v1/audio/speech \
   -H 'Content-Type: application/json' \
   -d '{"model":"cosyvoice3-0.5b","input":"안녕하세요. 오늘 날씨가 정말 좋네요.","response_format":"mp3"}' \
   -o out.mp3
@@ -74,7 +79,7 @@ pytest deploy/strixhalo/tests/
 
 ## Home Assistant integration
 HA's **OpenAI-compatible TTS** (or the "OpenAI Conversation"/`rest_command` route) can point
-at this server: set the TTS base URL to `http://<server>:8000/v1` and model `cosyvoice3-0.5b`;
+at this server: set the TTS base URL to `http://<server>:8880/v1` and model `cosyvoice3-0.5b`;
 HA calls `POST /v1/audio/speech` and plays the returned mp3. Given the MIOpen novel-shape
 penalty, it's best for short, cache-warm phrases; for long/varied text expect ~1.5–2.4× RTF.
 

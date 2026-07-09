@@ -26,7 +26,7 @@ services:
       COSYVOICE_FP16: "1"
       SERVE_PORT: "8000"
     ports:
-      - "${SERVE_PORT:-8000}:8000"
+      - "${SERVE_PORT:-8880}:8000"
     volumes:
       - cosy_models:/models          # pretrained model (downloaded once, see README)
       - cosy_hf:/cache/hf            # HF cache
