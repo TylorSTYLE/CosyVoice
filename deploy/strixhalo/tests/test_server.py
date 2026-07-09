@@ -38,10 +38,38 @@ def test_health(client):
 
 
 def test_demo_page(client):
-    r = client.get('/')
-    assert r.status_code == 200
-    assert 'text/html' in r.headers['content-type']
-    assert '/v1/audio/speech' in r.text  # the page calls the API
+    for path in ('/', '/web'):
+        r = client.get(path)
+        assert r.status_code == 200, path
+        assert 'text/html' in r.headers['content-type']
+        assert '/v1/audio/speech' in r.text  # the page calls the API
+
+
+def test_korean_number_normalization():
+    f = server.normalize_korean_numbers
+    assert f('2024년') == '이천이십사년'
+    assert f('3000원') == '삼천원'
+    assert f('10개') == '십개'
+    assert f('가격은 3.5입니다') == '가격은 삼점오입니다'
+    assert f('0을 입력') == '영을 입력'
+    assert f('1억 2345만') == '일억 이천삼백사십오만'
+    # non-Korean text is left untouched (English requests keep their digits)
+    assert f('order 2024 now') == 'order 2024 now'
+
+
+def test_ko_numbers_applied_in_synth(monkeypatch, client):
+    seen = {}
+
+    class RecordingEngine(FakeEngine):
+        def synth(self, text, speed=1.0):
+            seen['text'] = text
+            return super().synth(text, speed)
+
+    server.ENGINE = RecordingEngine()
+    monkeypatch.setattr(server, 'KO_NUMBERS', True)
+    monkeypatch.setattr(server, 'pcm16_to_mp3_bytes', lambda pcm, sr, **k: b'ID3')
+    client.post('/v1/audio/speech', json={'input': '2024년입니다'})
+    assert seen['text'] == '이천이십사년입니다'
 
 
 def test_models(client):

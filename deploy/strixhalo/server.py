@@ -56,7 +56,62 @@ MODEL_ID = os.environ.get('COSYVOICE_MODEL_ID', 'cosyvoice3-0.5b')
 # Fixed seed -> deterministic token count -> stable flow/HiFi-GAN conv shapes -> MIOpen
 # kernel-cache hits on repeated text (big win for canned phrases). Set -1 to randomize.
 SEED = int(os.environ.get('COSYVOICE_SEED', '0'))
+# Convert Arabic digits in Korean text to sino-Korean BEFORE synthesis. CosyVoice's
+# frontend has no Korean normalizer, so Korean text falls into its English branch and
+# reads digits in English ("2024" -> "twenty twenty-four"). Set 0 to disable.
+KO_NUMBERS = os.environ.get('COSYVOICE_KO_NUMBERS', '1') not in ('0', 'false', 'False', '')
 SUPPORTED_FORMATS = {'mp3': 'audio/mpeg', 'wav': 'audio/wav'}
+
+import re as _re
+
+_SINO_DIGITS = '영일이삼사오육칠팔구'
+_SINO_SMALL = ['', '십', '백', '천']
+_SINO_BIG = ['', '만', '억', '조', '경']
+_HANGUL_RE = _re.compile(r'[가-힣]')
+_NUMBER_RE = _re.compile(r'\d+(?:\.\d+)?')
+
+
+def _sino_under_10000(n: int) -> str:
+    out = ''
+    for i in range(3, -1, -1):
+        d = (n // (10 ** i)) % 10
+        if d == 0:
+            continue
+        # drop the leading "일" for 십/백/천 (십 not 일십)
+        out += ('' if d == 1 and i >= 1 else _SINO_DIGITS[d]) + _SINO_SMALL[i]
+    return out
+
+
+def _sino_int(n: int) -> str:
+    if n == 0:
+        return '영'
+    parts, grp = [], 0
+    while n > 0:
+        chunk = n % 10000
+        if chunk:
+            parts.append(_sino_under_10000(chunk) + _SINO_BIG[grp])
+        n //= 10000
+        grp += 1
+    return ''.join(reversed(parts))
+
+
+def _number_to_sino(s: str) -> str:
+    if '.' in s:
+        intp, frac = s.split('.', 1)
+        head = _sino_int(int(intp)) if intp else '영'
+        return head + '점' + ''.join(_SINO_DIGITS[int(c)] for c in frac)
+    return _sino_int(int(s))
+
+
+def normalize_korean_numbers(text: str) -> str:
+    """Read Arabic numerals in sino-Korean, but only when the text is Korean.
+
+    Default reading is sino-Korean (correct for years/months/days/money/math). Native
+    numerals for hours/counters (3시 -> '세 시') and per-digit phone reading are NOT handled.
+    """
+    if not _HANGUL_RE.search(text):
+        return text  # leave English/other requests untouched
+    return _NUMBER_RE.sub(lambda m: _number_to_sino(m.group(0)), text)
 
 
 # ----------------------------- audio encoding (pure, testable) -----------------------------
@@ -198,6 +253,7 @@ $('#go').onclick=async()=>{
 
 
 @app.get('/', response_class=HTMLResponse)
+@app.get('/web', response_class=HTMLResponse)
 def demo():
     return DEMO_HTML
 
@@ -222,6 +278,8 @@ def create_speech(req: SpeechRequest):
     if fmt not in SUPPORTED_FORMATS:
         return JSONResponse(status_code=400, content={'error': {
             'message': f'unsupported response_format {fmt!r}; supported: {sorted(SUPPORTED_FORMATS)}'}})
+    if KO_NUMBERS:
+        text = normalize_korean_numbers(text)   # digits -> sino-Korean (CosyVoice has no KO normalizer)
     speed = float(req.speed or 1.0)
     pcm, sr = get_engine().synth(text, speed=speed)
     audio = encode(pcm, sr, fmt)

@@ -68,6 +68,12 @@ Body fields (OpenAI-compatible): `input` (required), `response_format` (`mp3`|`w
 produced cross-lingually from a short reference clip (`asset/zero_shot_prompt.wav`); drop
 a Korean reference clip and set `COSYVOICE_PROMPT_WAV`/`COSYVOICE_PROMPT_TEXT` for KR-native timbre.
 
+**Numbers in Korean text**: CosyVoice's frontend has no Korean normalizer, so Korean text with
+Arabic digits would otherwise be read in English ("2024" → "twenty twenty-four"). The server
+pre-converts digits to **sino-Korean** ("이천이십사"); toggle with `COSYVOICE_KO_NUMBERS` (default on).
+Limitation: sino-only — native numerals for hours/counters (3시 → ideally "세 시") and per-digit
+phone/ID reading are not handled.
+
 ## Benchmark (RTF)
 ```bash
 docker compose run --rm cosyvoice-tts python bench_cosyvoice.py --fp16

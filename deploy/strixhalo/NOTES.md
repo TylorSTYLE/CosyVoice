@@ -233,6 +233,15 @@ GPU 서빙 확인(compose, seed 고정 + startup warmup):
 - **startup warmup**: 첫 실요청의 콜드 컴파일 완화.
 - **GPU 가드**: torch.cuda 불가 시 명확한 에러로 기동 실패(CPU 폴백 차단).
 
+## 후속 — 한국어 숫자 영어발음 수정 (2026-07-10)
+- 증상: 한국어 문장의 아라비아 숫자가 영어로 발음("2024"→twenty…).
+- 원인: `cosyvoice/cli/frontend.py:127 text_normalize` 가 `contains_chinese`(한자)로 분기 → 한글은
+  한자 없어 **영어 분기**(`en_tn_model.normalize` + `spell_out_number`/inflect)로 숫자 영어화.
+  CosyVoice 에 한국어 정규화기 없음(wetext FST=zh/en/ja).
+- 해결(core 무수정): `server.py` 엔드포인트에서 합성 전 `normalize_korean_numbers()` 로 숫자를
+  사이노-코리안 변환(`2024`→이천이십사, `3.5`→삼점오). 한글 포함 텍스트에만 적용, `COSYVOICE_KO_NUMBERS`
+  토글. 한계: 사이노 고정(시각/조수사 고유어·전화번호 자리읽기 미대응). `/web` 데모 별칭 추가.
+
 ## 전체 결론
 - gfx1151 에서 **CosyVoice3 한국어 TTS 실시간 서빙 성립**(캐시 히트 RTF 0.40, OpenAI 호환 API).
 - **vLLM 불필요**(LLM 은 fp16 로 이미 빠름; 병목은 flow/hift MIOpen, vLLM 무관).
