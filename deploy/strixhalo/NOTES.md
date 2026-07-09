@@ -200,8 +200,18 @@ Phase 2 데이터상 LLM 은 병목 아님 → vLLM 은 실시간 달성에 불�
 ## Phase 3 — CosyVoice 연동 (서버)
 (대기)
 
-## Phase 4 — 서빙 + 벤치 (서버/로컬)
-(대기)
+## Phase 4 — 서빙 (서버/로컬) — 검증 PASS ✅ (2026-07-10)
+- 로컬(Mac): `pytest deploy/strixhalo/tests/` 9 passed / 1 skipped(ffmpeg). server.py OpenAI 스키마·
+  오디오 인코딩·요청/응답 로직 mock 검증 완료.
+- 서버: `docker compose up -d --build`(serve 스테이지=uvicorn), 포트 8880(.env SERVE_PORT).
+  - `GET /health` → `{"status":"ok"}` ✅
+  - `GET /v1/models` → `{"object":"list","data":[{"id":"cosyvoice3-0.5b",...}]}` ✅
+  - `POST /v1/audio/speech`(KR, mp3) → mp3 생성 성공. **cold 첫 요청 42.5s**(~7s 오디오 → RTF~6,
+    MIOpen 첫 커널 컴파일 = 이미 규명된 novel-shape 페널티). warm(동일 문장 재요청) RTF 측정은 대기.
+- compose 볼륨은 명시적 name 으로 기존 cosy_models/hf/ms/miopen 재사용. 캐시 named volume 영속화 완료.
+
+### 대기: warm RTF + 재생 확인
+동일 문장 2번째 curl(캐시 warm) 시간 + mp3 재생(한국어 청취) 확인 → 기록 후 최종 완료.
 
 ## Phase 5 — 마감
 (대기)
