@@ -33,7 +33,13 @@ services:
     restart: unless-stopped
 
 volumes:
+  # explicit name: reuse the volumes already populated by `docker run -v cosy_models:...`
+  # (otherwise compose would prefix them as strixhalo_cosy_models and lose the model).
   cosy_models:
+    name: cosy_models
   cosy_hf:
+    name: cosy_hf
   cosy_ms:
+    name: cosy_ms
   cosy_miopen:
+    name: cosy_miopen
