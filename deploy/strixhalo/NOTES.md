@@ -123,12 +123,27 @@ vLLM 비교의 분모. RTF<1.0 이면 vLLM 을 건너뛸 수도.
 - CosyVoice3.__init__ 은 `load_jit` 인자 없음 → bench 는 load_trt/load_vllm/fp16 만 전달.
 - torchaudio 2.9.0(인덱스) vs torch 2.9.1 patch 불일치 → `--no-deps` 설치로 회피.
 
-### 서버 실행 결과 (붙여넣기 대기)
+### 서버 실행 결과 (2026-07-10)
+빌드/모델다운로드/실행 성공까지 해결한 이슈(전부 dep/어댑터, GPU 무관):
+1. `openai-whisper` sdist: setuptools≥81 이 pkg_resources 제거 → `setuptools<81` 선설치+constraint.
+2. whisper triton<3 vs ROCm torch triton 3.5.1 → whisper `--no-deps` 별도 설치(deps 명시).
+3. `pyworld` sdist: `--no-build-isolation` 에 numpy 부재 → numpy+cython 선설치.
+4. torchaudio 2.9 가 load/save 를 TorchCodec 으로 라우팅(미설치) → bench 에서 soundfile shim(core 무수정).
+5. 이 fork API 는 prompt 를 **파일 경로**로 받음 → bench 가 경로 전달(텐서 아님).
+6. CosyVoice3 는 prompt_text 에 `<|endofprompt|>`(151646) 필수 → zero_shot + CV3 prompt_text.
+
+**GPU 연산 실증(gfx1151, 세그폴트 없음)**: 모델 GPU 로드 성공, MIOpen 커널 DB 사용, DiT flow 가
+AOTriton efficient attention 으로 SDPA 실행, HiFi-GAN conv1d GPU 실행. onnx frontend=CPU 폴백(정상),
+wetext 프론트엔드 사용. torch `2.9.1+rocm7.13.0rc2`, hip `7.13.99004`.
+
+**Phase 3 게이트 PASS ✅**: 한국어 wav 합성·재생 성공(zero_shot, 중국어 프롬프트 클립로 cross-lingual
+KR). → 최대 위험 #1(stock 휠 SIGSEGV) 완전 제거, 전체 파이프라인 gfx1151 동작 확인.
+
+### RTF (붙여넣기 대기)
 ```
-# build --target cosyvoice-eager  +  모델 다운로드  +  bench_cosyvoice.py RTF
+# bench 출력의 [run N] ... RTF / [result] best RTF 라인
 ```
-게이트: 알아들을 수 있는 KR wav + best RTF. RTF<1.0 이면 vLLM 불필요 가능성(→ Phase 4 서빙 직행),
-RTF≥1.0 이면 vLLM 소스빌드로 최적화 진행.
+이 수치로 Phase 2 go/no-go: RTF<1.0 → vLLM 건너뛰고 Phase 4 서빙 / RTF≥1.0 → Phase 2b vLLM.
 
 ## Phase 2b — vLLM 소스빌드 (필요 판정 시, GO/NO-GO)
 (eager RTF 결과에 따라)
