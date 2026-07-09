@@ -85,6 +85,8 @@ RUN uv pip install -r /tmp/requirements-strix.txt \
         --extra-index-url https://rocm.prereleases.amd.com/whl/gfx1151/ \
         --index-strategy unsafe-best-match \
         --no-build-isolation
+# openai-whisper --no-deps: keeps ROCm torch's triton 3.5.1 (whisper pins triton<3).
+RUN uv pip install --no-deps --no-build-isolation openai-whisper==20231117
 
 # App source. NOTE: third_party/Matcha-TTS must be populated on the host first:
 #   git submodule update --init --recursive

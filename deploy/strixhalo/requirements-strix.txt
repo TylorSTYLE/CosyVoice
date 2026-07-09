@@ -21,7 +21,14 @@ networkx==3.1
 omegaconf==2.3.0
 onnx==1.16.0
 onnxruntime==1.18.0
-openai-whisper==20231117
+# openai-whisper (frontend imports `whisper`) is installed separately with --no-deps
+# in the Dockerfile: it pins triton<3, which conflicts with ROCm torch's triton 3.5.1.
+# Its real runtime deps are provided here instead; triton (from torch) is only used
+# lazily by whisper's word-timestamp path (guarded), so `import whisper` is fine.
+tiktoken
+more-itertools
+numba
+tqdm
 protobuf==4.25
 pyarrow==18.1.0
 pydantic==2.7.0
