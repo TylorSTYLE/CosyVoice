@@ -34,11 +34,10 @@ def _sf_save(filepath, src, sample_rate, *args, **kwargs):
 torchaudio.load = _sf_load
 torchaudio.save = _sf_save
 
-# Let MIOpen (torch maps cudnn->MIOpen on ROCm) search + cache the fastest conv
-# algorithm per shape instead of the immediate-mode GemmFwdRest fallback that
-# dominates flow/HiFi-GAN time on gfx1151. Pairs with MIOPEN_FIND_MODE + a
-# persisted MIOPEN_USER_DB_PATH so repeated shapes reuse tuned kernels.
-torch.backends.cudnn.benchmark = True
+# NOTE: tried torch.backends.cudnn.benchmark=True + MIOPEN_FIND_MODE=NORMAL to fix
+# the flow/HiFi-GAN conv cost on gfx1151 — neither helped (MIOpen still falls back to
+# the insufficient-workspace GemmFwdRest solver on novel shapes; NORMAL added a ~50s
+# autotune penalty). Reverted to defaults. See NOTES.md Phase 2.
 
 from cosyvoice.cli.cosyvoice import AutoModel
 from cosyvoice.utils.common import set_all_random_seed

@@ -165,9 +165,34 @@ KR). → 최대 위험 #1(stock 휠 SIGSEGV) 완전 제거, 전체 파이프라�
   first-audio 지연('라이브'에 부합).
 - flow n_timesteps(DiT 스텝) 축소(품질/속도 트레이드오프).
 
-## Phase 2b — vLLM 소스빌드 (보류)
-Phase 2 데이터상 LLM 은 병목 아님 → vLLM 은 실시간 달성에 불필요. 필요 시(대량 동시 요청 배칭 등)
-재검토. 현재 최적화 축은 flow/hift + fp16 + 스트리밍으로 전환.
+## Phase 2c — flow/hift MIOpen 최적화 시도 (2026-07-10) — 실패, 플랫폼 한계 확인
+시도한 레버(어댑터/env, core 무수정): `torch.backends.cudnn.benchmark=True`,
+`MIOPEN_FIND_MODE=NORMAL`, 영속 MIOpen user-db, 스트리밍(고정 chunk 기대).
+- **MIOPEN_FIND_MODE=NORMAL: 해로움**. novel shape 마다 full autotune ~50s(1st inv run1/2
+  token2wav 51–52s). db warm 후에도 novel shape 여전히 ~7s → autotune 최선도 GemmFwdRest(느림).
+- **cudnn.benchmark=True: 무효과**. token2wav 7.1/7.4s(이전 7.2/7.5s와 동일). MIOpen
+  `provided < required` workspace 경고 그대로 → torch↔MIOpen 이 gfx1151 에서 conv workspace 부족
+  → 느린 GemmFwdRest 폴백. 이게 근본 원인, env 로 안 풀림.
+- **스트리밍: total RTF 악화**(best 1.35 vs non-stream 0.455). chunk 마다 token2wav → 페널티 반복.
+  `ttfc` ~2.5s(첫 오디오 지연).
+- → 세 레버 모두 되돌림(FIND_MODE, benchmark 제거). 기본이 더 나음.
+
+### 확정 결론 (수치 기반, 정직 보고)
+- **CosyVoice3 한국어 TTS 는 gfx1151 에서 동작하고, 실시간(fp16 RTF 0.455)은 shape 캐시 히트 시
+  실증됨** (token2wav 0.43s, llm 2.37s). 세그폴트 없음.
+- **일관된 실시간의 벽 = flow(DiT)+HiFi-GAN conv 의 MIOpen GemmFwdRest 폴백**(workspace 부족).
+  novel utterance 길이마다 token2wav ~7s → RTF 1.6–2.4. 시도한 env/스트리밍으로 해소 불가 =
+  gfx1151 MIOpen 플랫폼 한계(torch rocm7.13 스택 기준).
+- **vLLM 은 무관**(LLM 은 fp16 로 이미 ~2.2s). 원래 가설(AR memcpy 병목→vLLM) 이 하드웨어에선 성립 안 함.
+
+### 남은 옵션 (미해결)
+- 서빙 진행 + 정직한 RTF 문서화(warm 0.47 / novel 1.6–2.4).
+- flow 입력 고정길이 버킷팅(패딩)으로 MIOpen 커널 재사용 → 일관 0.47 목표. **flow 추론(core) 수정
+  필요 → 승인 필요.**
+- 더 깊은 MIOpen 튜닝(PYTORCH_MIOPEN_SUGGEST_NHWC, TheRock 최신 빌드 등). 불확실.
+
+## Phase 2b — vLLM 소스빌드 (보류/불필요)
+Phase 2 데이터상 LLM 은 병목 아님 → vLLM 은 실시간 달성에 불필요.
 
 ## Phase 2b — vLLM 소스빌드 (필요 판정 시, GO/NO-GO)
 (eager RTF 결과에 따라)
